@@ -1,0 +1,7 @@
+# Ignore the renv directory and lock file
+.venv/
+.vscode/
+notebooks/
+nuke/
+data/
+pyproject.toml
