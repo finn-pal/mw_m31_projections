@@ -40,30 +40,6 @@ class Conversions:
         m_abs = m_app - 5 * np.log10(d_pc / 10)
         return np.round(m_abs, 2)
 
-    @staticmethod
-    def vega_to_ab(M_vega: float, bands_dict: dict, band_type: str, band: str):
-        # convert absolute magnitudes from Vega zeropoint to AB zeropoint
-        fil = FILTERS[bands_dict[band_type][band]["fsps"]]
-
-        Mabs_sol_vega = fil.msun_vega  # Vega
-        Mabs_sol_ab = fil.msun_ab  # AB
-
-        # assume solar offset between Vega and AB can apply to GCs
-        offset = Mabs_sol_vega - Mabs_sol_ab
-        return M_vega + offset
-
-    @staticmethod
-    def ab_to_vega(M_ab: float, bands_dict: dict, band_type: str, band: str):
-        # convert absolute magnitudes from AB zeropoint to Vega zeropoint
-        fil = FILTERS[bands_dict[band_type][band]["fsps"]]
-
-        Mabs_sol_vega = fil.msun_vega  # Vega
-        Mabs_sol_ab = fil.msun_ab  # AB
-
-        # assume solar offset between Vega and AB can apply to GCs
-        offset = Mabs_sol_ab - Mabs_sol_vega
-        return M_ab + offset
-
 
 #############################################################################################################
 
@@ -321,7 +297,7 @@ class Galaxy_Surface_Brightness:
 
     @staticmethod
     def gal_surface_brightness(
-        y: float, z: float, bands_dict: dict, dat_dir: str, band_type: str, band: str, sb_min: float = 29.5
+        y: float, z: float, bands_dict: dict, dat_dir: str, band_type: str, band: str, sb_min: float = 24.5
     ):
 
         # If using Johnson-Cousins then zeropoints is Vega else if using SDSS then zeropoints is AB
@@ -367,8 +343,6 @@ class Galaxy_Surface_Brightness:
         sb_dict = {}
 
         for band_type in bands.keys():
-            if band_type == "ref":
-                continue
             for band in bands[band_type]:
                 mu_hld = []
                 for y, z in zip(ys_pc, zs_pc):
@@ -408,67 +382,32 @@ class Magntiudes:
         return Mabs
 
     @staticmethod
-    def get_color(
-        sp,
-        age_gyr: float,
-        feh: float,
-        bands_dict: dict,
-        ref_band_type: str,
-        ref_band: str,
-        band_type: str,
-        band: str,
-    ):
-        ref_Mabs = Magntiudes.band_abs_mags(sp, age_gyr, feh, bands_dict, ref_band_type, ref_band)
-        # print(band_type, band)
-        oth_Mabs = Magntiudes.band_abs_mags(sp, age_gyr, feh, bands_dict, band_type, band)
+    def get_absolute_magnitudes(dat_dir: str, bands: dict, ref_key: str, ref_mag: np.ndarray):
 
-        color = ref_Mabs - oth_Mabs
+        col_path = os.path.join(dat_dir, "mw/colors/", "colors_reference.csv")
+        df_col = pd.read_csv(col_path)
 
-        return color
+        # ref_band_type = next(iter(bands["ref"]))
+        # ref_band = bands["ref"][ref_band_type]
+        # ref_key = ref_band_type + "_" + ref_band
 
-    @staticmethod
-    def get_absolute_magnitudes(
-        bands: dict, bands_dict: dict, ages: np.ndarray, fehs: np.ndarray, ref_mag: np.ndarray
-    ):
+        # for band_type in bands.keys():
+        #     for band in bands[band_type]:
+        #         band_key = band_type + "_" + band
+        #         col_name = ref_key + "-" + band_key
 
-        ref_band_type = next(iter(bands["ref"]))
-        ref_band = bands["ref"][ref_band_type]
-
-        # assume Kroupa (2001) IMF
-        sp = fsps.StellarPopulation(imf_type=2, zcontinuous=1)
+        #         mag_dict[col_name] = df_col[col_name]
 
         mag_dict = {}
-
-        # get colors
-        # this takes ~1.75min
         for band_type in bands.keys():
-            if band_type == "ref":
-                continue
             for band in bands[band_type]:
-                col_hld = []
-                for age, feh in zip(ages, fehs):
-                    if (np.isnan(age)) | (np.isnan(feh)):
-                        col_hld.append(np.nan)
-                        continue
-
-                    col = Magntiudes.get_color(
-                        sp, age, feh, bands_dict, ref_band_type, ref_band, band_type, band
-                    )
-                    col_hld.append(col)
-
-                col_name = ref_band_type + "_" + ref_band + "-" + band_type + "_" + band
-                mag_dict[col_name] = np.array(col_hld)
-
-        for band_type in bands.keys():
-            if band_type == "ref":
-                continue
-            for band in bands[band_type]:
-                if (band_type + "_" + band) == (ref_band_type + "_" + ref_band):
-                    mag_dict[band_type + "_" + band] = ref_mag
-                    continue
-                col_name = ref_band_type + "_" + ref_band + "-" + band_type + "_" + band
-                color = mag_dict[col_name]
-                mag_dict[band_type + "_" + band] = ref_mag - color
+                band_key = band_type + "_" + band
+                if band_key == ref_key:
+                    mag_dict[band_key] = ref_mag
+                else:
+                    col_name = ref_key + "-" + band_key
+                    color = df_col[col_name]
+                    mag_dict[band_key] = ref_mag - color
 
         return mag_dict
 
@@ -480,8 +419,6 @@ class Magntiudes:
         sb_dict = {}
 
         for band_type in bands.keys():
-            if band_type == "ref":
-                continue
             for band in bands[band_type]:
                 m_app = mag_dict[band_type + "_" + band] + 5 * np.log10(gc_dist_pc) - 5
                 sb_dict["gc_sb" + "_" + band_type + "_" + band] = m_app + 2.5 * np.log10(pixel_scale**2)
@@ -489,14 +426,14 @@ class Magntiudes:
         return sb_dict
 
     @staticmethod
-    def sb_limits(sb_gc_dict: dict, sb_gal_dict: dict, bands: dict):
+    def sb_limits(sb_gc_dict: dict, sb_gal_dict: dict, sb_key: str):
 
-        ref_band_type = next(iter(bands["ref"]))
-        ref_band = bands["ref"][ref_band_type]
+        # ref_band_type = next(iter(bands["ref"]))
+        # ref_band = bands["ref"][ref_band_type]
 
         # if GC surface brightness is brighter than background galaxy then return True
-        gal_sb = sb_gal_dict["gal_sb_" + ref_band_type + "_" + ref_band]
-        gc_sb = sb_gc_dict["gc_sb_" + ref_band_type + "_" + ref_band]
+        gal_sb = sb_gal_dict["gal_sb_" + sb_key]
+        gc_sb = sb_gc_dict["gc_sb_" + sb_key]
 
         return gc_sb < gal_sb
 
@@ -634,8 +571,6 @@ class Extinction:
         ext_dict = {"EBV": EBV}
 
         for band_type in bands.keys():
-            if band_type == "ref":
-                continue
             for band in bands[band_type]:
                 band_key = band_type + "_" + band
                 band_units = bands_dict[band_type][band]["units"]
@@ -679,8 +614,6 @@ class Extinction:
         # d_pc = d_kpc * 1000
 
         for band_type in bands.keys():
-            if band_type == "ref":
-                continue
             for band in bands[band_type]:
                 band_key = band_type + "_" + band
                 m_abs = gc_dict[band_key]
@@ -701,13 +634,11 @@ class Extinction:
         M_abs_lim = sb_min - 2.5 * np.log10(pixel_scale**2) - 5 * np.log10(gc_dist_pc) + 5
 
         for band_type in bands.keys():
-            if band_type == "ref":
-                continue
             for band in bands[band_type]:
                 band_key = band_type + "_" + band
                 m_abs_ext = gc_dict[band_key + "_ext"]
 
-                gc_dict[band_key + "_ext_obs_mask"] = m_abs_ext < M_abs_lim
+                gc_dict["ext_mask"] = m_abs_ext < M_abs_lim
 
         return gc_dict
 
@@ -716,14 +647,16 @@ class Extinction:
 
 
 @dataclass
-class Observation:
+class Single_Observation:
     galaxy: str | int  # galaxy identifier (name or gid)
     dat_dir: str  # base directory containing geckos/ and mw/gcs/
     bands: dict  # dictionary of bands to determine
     theta: float | None = None
     pixel_scale: float = 0.2  # arcsec
-    sb_min: float = 29.5  # surface brightness limit (mag arcsec^-2)
+    sb_min: float = 24.5  # surface brightness limit (mag arcsec^-2)
     get_gc_mags: bool = True  # time crunch
+    ref_key: str = "JC_V"
+    sb_key: str = "JC_V"
 
     gc_data: dict = field(init=False)
     field_data: dict = field(init=False)
@@ -795,8 +728,8 @@ class Observation:
         r_sun_mw_kpc = mw_gcs["r_sun"].values
         r_sun_mw_pc = r_sun_mw_kpc * 1000
         ref_mag = Conversions.app_to_abs(mw_gcs["V"], r_sun_mw_pc)
-        ages = mw_gcs["Mean_tau"].values  # Gyr
-        fehs = mw_gcs["Mean_feh"].values
+        ages = mw_gcs["age_gyr"].values  # Gyr
+        fehs = mw_gcs["feh"].values
 
         gc_dict = {
             "ID": mw_gcs["cluster_name"].values,
@@ -805,7 +738,7 @@ class Observation:
             "vxyz": vel,
             "xyz_rot": pos_rot,
             "vxyz_rot": vel_rot,
-            "class": mw_gcs["classification"].values,
+            "class": mw_gcs["class"].values,
             "age": ages,
             "feh": fehs,
             "r_sun_mw_kpc": r_sun_mw_kpc,
@@ -821,13 +754,13 @@ class Observation:
         gc_dict.update(gal_sb_dict)
 
         if self.get_gc_mags:
-            mag_dict = Magntiudes.get_absolute_magnitudes(self.bands, self.bands_dict, ages, fehs, ref_mag)
+            mag_dict = Magntiudes.get_absolute_magnitudes(self.dat_dir, self.bands, self.ref_key, ref_mag)
             sb_dict = Magntiudes.process_gc_sb(mag_dict, self.bands, gc_dist_pc, self.pixel_scale)
-            sb_lim = Magntiudes.sb_limits(sb_dict, gal_sb_dict, self.bands)
+            sb_lim = Magntiudes.sb_limits(sb_dict, gal_sb_dict, self.sb_key)
 
             gc_dict.update(mag_dict)
             gc_dict.update(sb_dict)
-            gc_dict["sb_JC_V_mask"] = sb_lim
+            gc_dict["sb_mask"] = sb_lim
 
             ext_dict = Extinction.process_extinction(
                 pos_rot, self.field_data["gal_dis_kpc"], self.theta, self.bands, self.bands_dict
@@ -843,41 +776,58 @@ class Observation:
 #############################################################################################################
 
 
-class Plotting:
-    @staticmethod
-    def plot_region(gc_dict: dict, field_dict: dict, mask_str: str, scale: str = "kpc"):
-        r_view, z_view = gc_dict["R_offset_" + scale], gc_dict["z_offset_" + scale]
-        mask = gc_dict[mask_str]
+@dataclass
+class Observation:
+    galaxy: str | int
+    dat_dir: str
+    bands: dict
+    thetas: int | list[float]  # <--- can be int (N views) or list of angles
 
-        plt.figure(figsize=(10, 5))
+    pixel_scale: float = 0.2
+    sb_min: float = 24.5
+    get_gc_mags: bool = True
+    ref_key: str = "JC_V"
+    sb_key: str = "JC_V"
 
-        plt.scatter(r_view[mask], z_view[mask], s=5, c="g")
-        plt.scatter(r_view[~mask], z_view[~mask], s=5, c="r")
+    observations: list = field(init=False)
 
-        for region in field_dict["regions"]:
-            corners_rot = field_dict["regions"][region]["corners_rot_" + scale]
+    def __post_init__(self):
 
-            if region[0] == "a":
-                c = "cyan"
-            else:
-                c = "lime"
-            plt.plot(corners_rot[:, 0], corners_rot[:, 1], c=c, lw=1, zorder=0)
+        # -------------------------------------------------------
+        # 1) If user passed an integer → generate that many random θ
+        # -------------------------------------------------------
+        if isinstance(self.thetas, int):
+            N = self.thetas
+            self.thetas = list(np.random.rand(N) * 360)
 
-        if scale == "kpc":
-            plt.xticks([-20, 0, 20])
-            plt.yticks([-10, 0, 10])
+        # Basic sanity for any other input
+        if not hasattr(self.thetas, "__iter__"):
+            raise ValueError("`thetas` must be a list of angles or an integer.")
 
-            plt.xlim(-34, 34)
-            plt.ylim(-17, 17)
+        # -------------------------------------------------------
+        # 2) Build all Observation_Single objects
+        # -------------------------------------------------------
+        self.observations = []
 
-        elif scale == "arcsec":
-            plt.xticks([-200, -100, 0, 100, 200])
-            plt.yticks([-100, -50, 0, 50, 100])
+        for theta in self.thetas:
+            obs = Single_Observation(
+                galaxy=self.galaxy,
+                dat_dir=self.dat_dir,
+                bands=self.bands,
+                theta=theta,
+                pixel_scale=self.pixel_scale,
+                sb_min=self.sb_min,
+                get_gc_mags=self.get_gc_mags,
+                ref_key=self.ref_key,
+                sb_key=self.sb_key,
+            )
+            self.observations.append(obs)
 
-            plt.xlim(-300, 300)
-            plt.ylim(-150, 150)
+    # -------------------------------------------------------
+    # Make class behave like a list of Observation_Single
+    # -------------------------------------------------------
+    def __len__(self):
+        return len(self.observations)
 
-        plt.gca().set_aspect(0.5)
-
-        plt.xlabel("R Offset [" + scale + "]")
-        plt.ylabel("z Offset [" + scale + "]")
+    def __getitem__(self, idx):
+        return self.observations[idx]
