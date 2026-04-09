@@ -24,6 +24,7 @@ jupyter_core==5.8.1
 kiwisolver==1.4.7
 matplotlib==3.9.2
 matplotlib-inline==0.1.7
+-e git+https://github.com/finn-pal/mw_m31_projections.git@2370aeaa21ea8ab872673c1291f6e7aa6f6c168b#egg=mw_m31_projections
 nest-asyncio==1.6.0
 numpy==1.26.0
 packaging==24.2
