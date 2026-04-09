@@ -6,8 +6,6 @@ import json
 from dataclasses import dataclass, field
 
 import astropy.units as u
-import fsps
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from fsps.filters import FILTERS
@@ -426,7 +424,22 @@ class Magntiudes:
         return sb_dict
 
     @staticmethod
-    def sb_limits(sb_gc_dict: dict, sb_gal_dict: dict, sb_key: str):
+    def sb_limits(sb_gc_dict: dict, sb_gal_dict: dict, sb_key: str, sb_frac: float = 1) -> bool:
+        """
+        Returns True if the GC surface brightness is brighter than a fraction (sb_frac) of the galaxy surface
+        brightness.
+
+        Args:
+            sb_gc_dict (dict): _description_
+            sb_gal_dict (dict): _description_
+            sb_key (str): _description_
+            sb_frac (float, optional): If 1 then GC is brighter than galaxy. If 0.5 then GC is brighter
+                than a galaxy at half the brightness. If 2 then GC is brighter than a galaxy at double the
+                brightness. Defaults to 1.
+
+        Returns:
+            bool: _description_
+        """
 
         # ref_band_type = next(iter(bands["ref"]))
         # ref_band = bands["ref"][ref_band_type]
@@ -435,7 +448,7 @@ class Magntiudes:
         gal_sb = sb_gal_dict["gal_sb_" + sb_key]
         gc_sb = sb_gc_dict["gc_sb_" + sb_key]
 
-        return gc_sb < gal_sb
+        return gc_sb < gal_sb - 2.5 * np.log10(sb_frac)
 
 
 #############################################################################################################
@@ -657,6 +670,7 @@ class Single_Observation:
     get_gc_mags: bool = True  # time crunch
     ref_key: str = "JC_V"
     sb_key: str = "JC_V"
+    sb_frac: float = 1
 
     gc_data: dict = field(init=False)
     field_data: dict = field(init=False)
@@ -756,7 +770,7 @@ class Single_Observation:
         if self.get_gc_mags:
             mag_dict = Magntiudes.get_absolute_magnitudes(self.dat_dir, self.bands, self.ref_key, ref_mag)
             sb_dict = Magntiudes.process_gc_sb(mag_dict, self.bands, gc_dist_pc, self.pixel_scale)
-            sb_lim = Magntiudes.sb_limits(sb_dict, gal_sb_dict, self.sb_key)
+            sb_lim = Magntiudes.sb_limits(sb_dict, gal_sb_dict, self.sb_key, self.sb_frac)
 
             gc_dict.update(mag_dict)
             gc_dict.update(sb_dict)
@@ -788,6 +802,7 @@ class Observation:
     get_gc_mags: bool = True
     ref_key: str = "JC_V"
     sb_key: str = "JC_V"
+    sb_frac: float = 1
 
     observations: list = field(init=False)
 
@@ -820,6 +835,7 @@ class Observation:
                 get_gc_mags=self.get_gc_mags,
                 ref_key=self.ref_key,
                 sb_key=self.sb_key,
+                sb_frac=self.sb_frac,
             )
             self.observations.append(obs)
 
