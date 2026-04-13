@@ -141,7 +141,7 @@ class Magntiudes:
 
 
 @dataclass
-class Single_Observation:
+class M31_Observation:
     galaxy: str | int  # galaxy identifier (name or gid)
     dat_dir: str  # base directory containing geckos/ and mw/gcs/
     pixel_scale: float = 0.2  # arcsec
