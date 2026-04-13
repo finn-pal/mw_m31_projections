@@ -56,7 +56,7 @@ class Galaxy_Surface_Brightness:
         # Sigma_mass will be in units of [M_sol pc^-2]
         # and so Sigma_lum will be in units of [L_sol pc^-2]
 
-        mw_mags_path = dat_dir + "supplementary/mw_magnitudes.json"
+        mw_mags_path = dat_dir + "mw/mw_ml_ratios/mw_magnitudes.json"
         with open(mw_mags_path, "r") as f:
             mw_mags_dict = json.load(f)
 
@@ -411,19 +411,19 @@ class Extinction:
         return gc_dict
 
     @staticmethod
-    def observation_limit(gc_dict: dict, bands: dict, sb_min: float, pixel_scale: float):
+    def observation_limit(gc_dict: dict, bands: dict, sb_key: str, sb_min: float, pixel_scale: float):
         # calculate absolute magntiude observational limit
         gc_dist_kpc = gc_dict["gc_dist_kpc"]
         gc_dist_pc = gc_dist_kpc * 1000
 
-        M_abs_lim = sb_min - 2.5 * np.log10(pixel_scale**2) - 5 * np.log10(gc_dist_pc) + 5
+        m_abs_lim = sb_min - 2.5 * np.log10(pixel_scale**2) - 5 * np.log10(gc_dist_pc) + 5
 
         for band_type in bands.keys():
             for band in bands[band_type]:
                 band_key = band_type + "_" + band
-                m_abs_ext = gc_dict[band_key + "_ext"]
-
-                gc_dict["ext_mask"] = m_abs_ext < M_abs_lim
+                if band_key == sb_key:
+                    m_abs_ext = gc_dict[band_key + "_ext"]
+                    gc_dict["ext_mask"] = m_abs_ext < m_abs_lim
 
         return gc_dict
 
@@ -554,7 +554,9 @@ class Single_Observation:
             gc_dict.update(ext_dict)
 
             gc_dict = Extinction.apply_extinction(gc_dict, self.bands)
-            gc_dict = Extinction.observation_limit(gc_dict, self.bands, self.sb_min, self.pixel_scale)
+            gc_dict = Extinction.observation_limit(
+                gc_dict, self.bands, self.sb_key, self.sb_min, self.pixel_scale
+            )
 
         return gc_dict
 
@@ -563,12 +565,11 @@ class Single_Observation:
 
 
 @dataclass
-class Observation:
+class MW_Observation:
     galaxy: str | int
     dat_dir: str
     bands: dict
     thetas: int | list[float]  # <--- can be int (N views) or list of angles
-
     pixel_scale: float = 0.2
     sb_min: float = 24.5
     get_gc_mags: bool = True
