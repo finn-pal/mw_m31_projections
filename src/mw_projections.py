@@ -512,8 +512,18 @@ class Single_Observation:
         # get gc absolute magntiudes and surface brightness
         # ref_mag = Conversions.app_to_abs(mw_gcs["V"], gc_dist_pc)
         r_sun_mw_kpc = mw_gcs["r_sun"].values
-        r_sun_mw_pc = r_sun_mw_kpc * 1000
-        ref_mag = Conversions.app_to_abs(mw_gcs["V"], r_sun_mw_pc)
+        # r_sun_mw_pc = r_sun_mw_kpc * 1000
+
+        # V-band apparent magntiudes from Baumgardt et al. (2020) are observed values. Need to correct to
+        # intrinsic V-band apparent magntiudes using the color excess from Harris (2010).
+        # Then can convert to absolute magntiudes
+        # Instead of the above I have just taken absolute magntiudes from appendix of Baumgardt et al. (2020)
+        # If GC didn't have it I calculated using E(B-V) from Harris (2010).
+        # If Gc didn't have assumed no extinction and converted apparent to absolute directly.
+
+        # ref_mag = Conversions.app_to_abs(mw_gcs["V"], r_sun_mw_pc)
+        ref_mag = mw_gcs["V_abs"].values
+
         ages = mw_gcs["age_gyr"].values  # Gyr
         fehs = mw_gcs["feh"].values
 

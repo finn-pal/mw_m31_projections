@@ -223,6 +223,7 @@ class M31_Observation:
             "z_offset_kpc": ys_m31_kpc,  # have repeated y_kpc for plotting consistency with mw data
             "R_offset_arcsec": R_offset_arcsec,
             "z_offset_arcsec": z_offset_arcsec,
+            "class": m31_gcs["class"].values,
             "pos_mask": pos_mask,
         }
 
