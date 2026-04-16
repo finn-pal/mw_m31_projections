@@ -101,8 +101,8 @@ class Galaxy_Surface_Brightness:
         # surface brightness
         mu = Mabs_sol - 2.5 * np.log10(Sigma_lum) + 21.572
 
-        # min detection of halo light ~29.5 mag/arcsec https://ui.adsabs.harvard.edu/abs/2022ApJ...932...44G/abstract
-        mu = np.min((mu, sb_min))
+        # cannot detect below limit
+        # mu = np.min((mu, sb_min))
 
         return mu
 
@@ -182,8 +182,9 @@ class Magntiudes:
         return mag_dict
 
     @staticmethod
-    def process_gc_sb(mag_dict: dict, bands: dict, gc_dist_pc: np.ndarray, pixel_scale: float = 0.2):
-        # assume a single GC takes up a full pixel
+    def process_gc_sb(
+        mag_dict: dict, bands: dict, gc_dist_pc: np.ndarray, n_pix: float, pixel_scale: float = 0.2
+    ):
         # pixel spatial scale = 0.2  # arcsec pixel^−1
 
         sb_dict = {}
@@ -191,7 +192,9 @@ class Magntiudes:
         for band_type in bands.keys():
             for band in bands[band_type]:
                 m_app = mag_dict[band_type + "_" + band] + 5 * np.log10(gc_dist_pc) - 5
-                sb_dict["gc_sb" + "_" + band_type + "_" + band] = m_app + 2.5 * np.log10(pixel_scale**2)
+                sb_dict["gc_sb" + "_" + band_type + "_" + band] = m_app + 2.5 * np.log10(
+                    n_pix * pixel_scale**2
+                )
 
         return sb_dict
 
@@ -221,6 +224,33 @@ class Magntiudes:
         gc_sb = sb_gc_dict["gc_sb_" + sb_key]
 
         return gc_sb < gal_sb - 2.5 * np.log10(sb_frac)
+
+    @staticmethod
+    def pixel_count(
+        field_dict: dict,
+        psf_fwhm_arcsec: float = 0.4,
+        gc_avg_rad_pc: float = 4.9,
+        gc_r_scale: float = 1.5,
+        pixel_scale: float = 0.2,
+    ) -> float:
+
+        d_kpc = field_dict["gal_dis_kpc"]
+        d_pc = d_kpc * 1000
+
+        r_gc_pc = gc_avg_rad_pc * gc_r_scale
+        theta_arcsec = (r_gc_pc / d_pc) * 206265  # Angular radius (arcsec)
+        r_pix = theta_arcsec / pixel_scale  # Radius in pixels
+        n_pix_int = np.pi * r_pix**2  # Intrinsic number of pixels (area)
+
+        # FWHM = 2 * np.sqrt(2*np.log(2)) * sigma
+        psf_sigma = psf_fwhm_arcsec / (2 * np.sqrt(2 * np.log(2)))
+        n_pix_psf = np.pi * (psf_sigma / pixel_scale) ** 2
+        n_pix = np.maximum(n_pix_int, n_pix_psf)
+
+        # ensure is at least 1 pixel
+        # n_pix = np.maximum(n_pix, 1.0)
+
+        return n_pix
 
 
 #############################################################################################################
@@ -411,12 +441,14 @@ class Extinction:
         return gc_dict
 
     @staticmethod
-    def observation_limit(gc_dict: dict, bands: dict, sb_key: str, sb_min: float, pixel_scale: float):
+    def observation_limit(
+        gc_dict: dict, bands: dict, sb_key: str, sb_min: float, n_pix: float, pixel_scale: float
+    ):
         # calculate absolute magntiude observational limit
         gc_dist_kpc = gc_dict["gc_dist_kpc"]
         gc_dist_pc = gc_dist_kpc * 1000
 
-        m_abs_lim = sb_min - 2.5 * np.log10(pixel_scale**2) - 5 * np.log10(gc_dist_pc) + 5
+        m_abs_lim = sb_min - 2.5 * np.log10(n_pix * pixel_scale**2) - 5 * np.log10(gc_dist_pc) + 5
 
         for band_type in bands.keys():
             for band in bands[band_type]:
@@ -443,6 +475,10 @@ class Single_Observation:
     ref_key: str = "JC_V"
     sb_key: str = "JC_V"
     sb_frac: float = 1
+    psf_fwhm_arcsec: float = 0.4
+    gc_avg_rad_pc: float = 4.9
+    gc_r_scale: float = 1.5
+    n_pix: float = None
 
     gc_data: dict = field(init=False)
     field_data: dict = field(init=False)
@@ -527,6 +563,13 @@ class Single_Observation:
         ages = mw_gcs["age_gyr"].values  # Gyr
         fehs = mw_gcs["feh"].values
 
+        # get number of pixels an average gc will occupy at the projected distance of the galaxy
+        n_pix = self.n_pix
+        if n_pix is None:
+            n_pix = Magntiudes.pixel_count(
+                self.field_data, self.psf_fwhm_arcsec, self.gc_avg_rad_pc, self.gc_r_scale, self.pixel_scale
+            )
+
         gc_dict = {
             "ID": mw_gcs["cluster_name"].values,
             "JC_V": ref_mag,
@@ -544,6 +587,7 @@ class Single_Observation:
             "z_offset_kpc": dz,
             "R_offset_arcsec": R_offset_arcsec,
             "z_offset_arcsec": z_offset_arcsec,
+            "n_pix": n_pix,
             "pos_mask": pos_mask,
         }
 
@@ -551,7 +595,7 @@ class Single_Observation:
 
         if self.get_gc_mags:
             mag_dict = Magntiudes.get_absolute_magnitudes(self.dat_dir, self.bands, self.ref_key, ref_mag)
-            sb_dict = Magntiudes.process_gc_sb(mag_dict, self.bands, gc_dist_pc, self.pixel_scale)
+            sb_dict = Magntiudes.process_gc_sb(mag_dict, self.bands, gc_dist_pc, n_pix, self.pixel_scale)
             sb_lim = Magntiudes.sb_limits(sb_dict, gal_sb_dict, self.sb_key, self.sb_frac)
 
             gc_dict.update(mag_dict)
@@ -565,7 +609,7 @@ class Single_Observation:
 
             gc_dict = Extinction.apply_extinction(gc_dict, self.bands)
             gc_dict = Extinction.observation_limit(
-                gc_dict, self.bands, self.sb_key, self.sb_min, self.pixel_scale
+                gc_dict, self.bands, self.sb_key, self.sb_min, n_pix, self.pixel_scale
             )
 
         return gc_dict
@@ -580,12 +624,16 @@ class MW_Observation:
     dat_dir: str
     bands: dict
     thetas: int | list[float]  # <--- can be int (N views) or list of angles
-    pixel_scale: float = 0.2
+    pixel_scale: float = 0.2  # arcsec
     sb_min: float = 24.5
     get_gc_mags: bool = True
     ref_key: str = "JC_V"
     sb_key: str = "JC_V"
     sb_frac: float = 1
+    psf_fwhm_arcsec: float = 0.4
+    gc_avg_rad_pc: float = 4.9
+    gc_r_scale: float = 1.5
+    n_pix: float = None
 
     observations: list = field(init=False)
 
@@ -619,6 +667,10 @@ class MW_Observation:
                 ref_key=self.ref_key,
                 sb_key=self.sb_key,
                 sb_frac=self.sb_frac,
+                psf_fwhm_arcsec=self.psf_fwhm_arcsec,
+                gc_avg_rad_pc=self.gc_avg_rad_pc,
+                gc_r_scale=self.gc_r_scale,
+                n_pix=self.n_pix,
             )
             self.observations.append(obs)
 

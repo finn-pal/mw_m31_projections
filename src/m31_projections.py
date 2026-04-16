@@ -4,11 +4,9 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
-from fsps.filters import FILTERS
-from scipy.integrate import quad, quad_vec
 
 from field import Field
-from utils import Conversions, Transforms
+from utils import Conversions
 
 #############################################################################################################
 
@@ -18,6 +16,16 @@ class Galaxy_Surface_Brightness:
     Set of functions used to calculate galaxy surface brightness.
     Based on Courteau et al. (2011)
     """
+
+    @staticmethod
+    def major_axis_radius(x, y, q):
+        """
+        Major-axis equivalent radius:
+        R = sqrt(x^2 + (y/q)^2)
+
+        x, y must be in the same units
+        """
+        return np.sqrt(x**2 + (y / q) ** 2)
 
     @staticmethod
     def sersic_profile(r: float, n: float, mu_e: float, R_e: float) -> float:
@@ -40,8 +48,18 @@ class Galaxy_Surface_Brightness:
 
     @staticmethod
     def get_sb_profile(
-        r: float | np.ndarray, dat_dir: str, model: str = "U", sb_key: str = "JC_I"
+        x: float | np.ndarray,
+        y: float | np.ndarray,
+        dat_dir: str,
+        model: str = "U",
+        sb_key: str = "JC_I",
+        epsilon_disk: float = 0.73,
+        epsilon_bulge: float = 0.25,
     ) -> float | np.ndarray:
+
+        # From Courteau et al. (2011)
+        # epsilon_disk = 0.73
+        # epsilon_bulge = 0.25
 
         band_type, band = sb_key.split("_")
 
@@ -64,14 +82,26 @@ class Galaxy_Surface_Brightness:
             sb_models = json.load(f)
         sb_dict = sb_models[band_type][band][model]
 
-        I_b = Galaxy_Surface_Brightness.sersic_profile(r, sb_dict["n"], sb_dict["mu_eb"], sb_dict["R_eb"])
-        I_d = Galaxy_Surface_Brightness.exp_profile(r, sb_dict["mu_0"], sb_dict["R_d"])
+        # calc ###########################
+        q_disk = 1.0 - epsilon_disk
+        q_bulge = 1.0 - epsilon_bulge
+
+        R_disk = Galaxy_Surface_Brightness.major_axis_radius(x, y, q_disk)
+        R_bulge = Galaxy_Surface_Brightness.major_axis_radius(x, y, q_bulge)
+        R_halo = np.sqrt(x**2 + y**2)  # assumed spherical
+
+        I_b = Galaxy_Surface_Brightness.sersic_profile(
+            R_bulge, sb_dict["n"], sb_dict["mu_eb"], sb_dict["R_eb"]
+        )
+        I_d = Galaxy_Surface_Brightness.exp_profile(R_disk, sb_dict["mu_0"], sb_dict["R_d"])
 
         if mkey == "Power-Law":
-            I_h = Galaxy_Surface_Brightness.power_law(r, sb_dict["mu_star"], sb_dict["a_h"], sb_dict["alpha"])
+            I_h = Galaxy_Surface_Brightness.power_law(
+                R_halo, sb_dict["mu_star"], sb_dict["a_h"], sb_dict["alpha"]
+            )
         elif mkey == "Sersic":
             I_h = Galaxy_Surface_Brightness.sersic_profile(
-                r, sb_dict["n_f"], sb_dict["mu_ef"], sb_dict["R_ef"]
+                R_halo, sb_dict["n_f"], sb_dict["mu_ef"], sb_dict["R_ef"]
             )
         else:
             assert False, f"Unexpected mkey: {mkey}"
@@ -96,13 +126,13 @@ class Magntiudes:
     """
 
     @staticmethod
-    def get_gc_sb(gc_dict: dict, gecko_dist_kpc: float, sb_key: str, pixel_scale: float = 0.2):
+    def get_gc_sb(gc_dict: dict, gecko_dist_kpc: float, sb_key: str, n_pix: float, pixel_scale: float = 0.2):
         gecko_dist_pc = gecko_dist_kpc * 1000
 
         m_abs = gc_dict[sb_key]
         m_app = m_abs + 5 * np.log10(gecko_dist_pc) - 5
 
-        mu_gc = m_app + 2.5 * np.log10(pixel_scale**2)
+        mu_gc = m_app + 2.5 * np.log10(n_pix * pixel_scale**2)
 
         return mu_gc
 
@@ -126,15 +156,42 @@ class Magntiudes:
 
     @staticmethod
     def observation_limit(
-        gc_dict: dict, gecko_dist_kpc: float, sb_key: str, sb_min: float, pixel_scale: float
+        gc_dict: dict, gecko_dist_kpc: float, sb_key: str, sb_min: float, n_pix: float, pixel_scale: float
     ) -> np.ndarray:
         # calculate absolute magntiude observational limit
         gecko_dist_pc = gecko_dist_kpc * 1000
 
-        m_abs_lim = sb_min - 2.5 * np.log10(pixel_scale**2) - 5 * np.log10(gecko_dist_pc) + 5
+        m_abs_lim = sb_min - 2.5 * np.log10(n_pix * pixel_scale**2) - 5 * np.log10(gecko_dist_pc) + 5
         m_abs = gc_dict[sb_key]
 
         return m_abs < m_abs_lim
+
+    @staticmethod
+    def pixel_count(
+        field_dict: dict,
+        psf_fwhm_arcsec: float = 0.4,
+        gc_avg_rad_pc: float = 4.9,
+        gc_r_scale: float = 1.5,
+        pixel_scale: float = 0.2,
+    ) -> float:
+
+        d_kpc = field_dict["gal_dis_kpc"]
+        d_pc = d_kpc * 1000
+
+        r_gc_pc = gc_avg_rad_pc * gc_r_scale
+        theta_arcsec = (r_gc_pc / d_pc) * 206265  # Angular radius (arcsec)
+        r_pix = theta_arcsec / pixel_scale  # Radius in pixels
+        n_pix_int = np.pi * r_pix**2  # Intrinsic number of pixels (area)
+
+        # FWHM = 2 * np.sqrt(2*np.log(2)) * sigma
+        psf_sigma = psf_fwhm_arcsec / (2 * np.sqrt(2 * np.log(2)))
+        n_pix_psf = np.pi * (psf_sigma / pixel_scale) ** 2
+        n_pix = np.maximum(n_pix_int, n_pix_psf)
+
+        # ensure is at least 1 pixel
+        # n_pix = np.maximum(n_pix, 1.0)
+
+        return n_pix
 
 
 #############################################################################################################
@@ -150,6 +207,10 @@ class M31_Observation:
     get_gc_mags: bool = True  # time crunch
     sb_key: str = "JC_I"
     sb_frac: float = 1
+    psf_fwhm_arcsec: float = 0.4
+    gc_avg_rad_pc: float = 4.9
+    gc_r_scale: float = 1.5
+    n_pix: float = None
 
     gc_data: dict = field(init=False)
     field_data: dict = field(init=False)
@@ -206,6 +267,13 @@ class M31_Observation:
         # get region masking
         pos_mask = Field.positional_masking(xs_m31_kpc, ys_m31_kpc, self.field_data, "kpc")
 
+        # get number of pixels an average gc will occupy at the projected distance of the galaxy
+        n_pix = self.n_pix
+        if n_pix is None:
+            n_pix = Magntiudes.pixel_count(
+                self.field_data, self.psf_fwhm_arcsec, self.gc_avg_rad_pc, self.gc_r_scale, self.pixel_scale
+            )
+
         gc_dict = {
             "ID": m31_gcs["Name"].values,
             "JC_U": Conversions.app_to_abs(m31_gcs["Umag"].values, m31_dist_pc),
@@ -224,20 +292,23 @@ class M31_Observation:
             "R_offset_arcsec": R_offset_arcsec,
             "z_offset_arcsec": z_offset_arcsec,
             "class": m31_gcs["class"].values,
+            "n_pix": n_pix,
             "pos_mask": pos_mask,
         }
 
         # galaxy surface brightness profile is not corrected for projection or extinction effects
-        mu_gal = Galaxy_Surface_Brightness.get_sb_profile(rp_kpc, self.dat_dir, self.sb_model, self.sb_key)
+        mu_gal = Galaxy_Surface_Brightness.get_sb_profile(
+            xs_m31_kpc, ys_m31_kpc, self.dat_dir, self.sb_model, self.sb_key
+        )
         gc_dict["gal_sb" + "_" + self.sb_key] = mu_gal
 
         # using 2 positions (projected x, y) and observed (pre-reddening correction) magntiudes
-        mu_gc = Magntiudes.get_gc_sb(gc_dict, gecko_dist_kpc, self.sb_key, self.pixel_scale)
+        mu_gc = Magntiudes.get_gc_sb(gc_dict, gecko_dist_kpc, self.sb_key, n_pix, self.pixel_scale)
         gc_dict["gc_sb" + "_" + self.sb_key] = mu_gc
 
         gc_dict["sb_mask"] = Magntiudes.sb_limits(mu_gc, mu_gal, self.sb_frac)
         gc_dict["ext_mask"] = Magntiudes.observation_limit(
-            gc_dict, gecko_dist_kpc, self.sb_key, self.sb_min, self.pixel_scale
+            gc_dict, gecko_dist_kpc, self.sb_key, self.sb_min, n_pix, self.pixel_scale
         )
 
         # extinction business can be ignored as taking observed colors

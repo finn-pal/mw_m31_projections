@@ -112,13 +112,17 @@ class Field:
         df_gal = pd.read_csv(gal_dir + "galaxy_details.csv")
 
         if type(gal) is int:
-            gal = df_gal.loc[df_gal["gid"] == gal + 1, "object"].values[0]
+            assert 1 <= gal <= 36, f"Galaxy ID {gal} is outside of range [1, 36]"
+            gid = gal
+            gal = df_gal.loc[df_gal["gid"] == gid, "object"].values[0]
+        else:
+            gid = df_gal.loc[df_gal["object"] == gal].index[0]
 
         # get galaxy details
         gal_dis_mpc = df_gal.loc[df_gal["object"] == gal, "d_mpc"].values[0]
         gal_dis_kpc = gal_dis_mpc * 1000
 
-        field_dict = {"gal": gal, "gal_dis_kpc": gal_dis_kpc, "regions": {}}
+        field_dict = {"gal": gal, "gid": gid, "gal_dis_kpc": gal_dis_kpc, "regions": {}}
 
         # different posible regions of observation
         regions = ["central", "disk", "outflow", "ext", "far", "giant", "huge"]
