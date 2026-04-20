@@ -475,7 +475,7 @@ class Single_Observation:
     ref_key: str = "JC_V"
     sb_key: str = "JC_V"
     sb_frac: float = 1
-    psf_fwhm_arcsec: float = 0.4
+    # psf_fwhm_arcsec: float = 0.4
     gc_avg_rad_pc: float = 4.9
     gc_r_scale: float = 1.5
     n_pix: float = None
@@ -567,7 +567,11 @@ class Single_Observation:
         n_pix = self.n_pix
         if n_pix is None:
             n_pix = Magntiudes.pixel_count(
-                self.field_data, self.psf_fwhm_arcsec, self.gc_avg_rad_pc, self.gc_r_scale, self.pixel_scale
+                self.field_data,
+                self.field_data["psf_fwhm"],
+                self.gc_avg_rad_pc,
+                self.gc_r_scale,
+                self.pixel_scale,
             )
 
         gc_dict = {
@@ -630,10 +634,11 @@ class MW_Observation:
     ref_key: str = "JC_V"
     sb_key: str = "JC_V"
     sb_frac: float = 1
-    psf_fwhm_arcsec: float = 0.4
+    # psf_fwhm_arcsec: float = 0.4
     gc_avg_rad_pc: float = 4.9
     gc_r_scale: float = 1.5
     n_pix: float = None
+    verbose: bool = False
 
     observations: list = field(init=False)
 
@@ -655,7 +660,9 @@ class MW_Observation:
         # -------------------------------------------------------
         self.observations = []
 
-        for theta in self.thetas:
+        for i, theta in enumerate(self.thetas):
+            if self.verbose:
+                print(self.galaxy, "-", i + 1, "/", len(self.thetas))
             obs = Single_Observation(
                 galaxy=self.galaxy,
                 dat_dir=self.dat_dir,
@@ -667,7 +674,7 @@ class MW_Observation:
                 ref_key=self.ref_key,
                 sb_key=self.sb_key,
                 sb_frac=self.sb_frac,
-                psf_fwhm_arcsec=self.psf_fwhm_arcsec,
+                # psf_fwhm_arcsec=self.psf_fwhm_arcsec,
                 gc_avg_rad_pc=self.gc_avg_rad_pc,
                 gc_r_scale=self.gc_r_scale,
                 n_pix=self.n_pix,

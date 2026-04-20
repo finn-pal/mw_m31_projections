@@ -207,7 +207,7 @@ class M31_Observation:
     get_gc_mags: bool = True  # time crunch
     sb_key: str = "JC_I"
     sb_frac: float = 1
-    psf_fwhm_arcsec: float = 0.4
+    # psf_fwhm_arcsec: float = 0.4
     gc_avg_rad_pc: float = 4.9
     gc_r_scale: float = 1.5
     n_pix: float = None
@@ -271,7 +271,11 @@ class M31_Observation:
         n_pix = self.n_pix
         if n_pix is None:
             n_pix = Magntiudes.pixel_count(
-                self.field_data, self.psf_fwhm_arcsec, self.gc_avg_rad_pc, self.gc_r_scale, self.pixel_scale
+                self.field_data,
+                self.field_data["psf_fwhm"],
+                self.gc_avg_rad_pc,
+                self.gc_r_scale,
+                self.pixel_scale,
             )
 
         gc_dict = {

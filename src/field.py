@@ -122,7 +122,14 @@ class Field:
         gal_dis_mpc = df_gal.loc[df_gal["object"] == gal, "d_mpc"].values[0]
         gal_dis_kpc = gal_dis_mpc * 1000
 
-        field_dict = {"gal": gal, "gid": gid, "gal_dis_kpc": gal_dis_kpc, "regions": {}}
+        if gal_dis_mpc <= 20:
+            psf_fwhm = 1
+        elif gal_dis_mpc <= 40:
+            psf_fwhm = 0.8
+        else:
+            psf_fwhm = 0.7
+
+        field_dict = {"gal": gal, "gid": gid, "gal_dis_kpc": gal_dis_kpc, "psf_fwhm": psf_fwhm, "regions": {}}
 
         # different posible regions of observation
         regions = ["central", "disk", "outflow", "ext", "far", "giant", "huge"]
